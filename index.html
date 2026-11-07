@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calm Compass</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <main class="wrap stack" style="max-width:720px;padding-top:8vh">
+    <div class="center stack">
+      <div style="font-size:3.5rem">🧭</div>
+      <h1>Calm Compass</h1>
+      <p class="muted">Emotional regulation breaks for autistic students, guided by their own words.</p>
+    </div>
+    <div class="choices two">
+      <a class="tile" href="/kid" style="text-decoration:none;color:inherit"><span class="emoji">🧒</span>I'm a student</a>
+      <a class="tile" href="/teacher" style="text-decoration:none;color:inherit"><span class="emoji">🧑‍🏫</span>I'm an instructor</a>
+    </div>
+    <p class="center muted" id="mode"></p>
+  </main>
+  <script type="module">
+    import { MODE } from '/src/db.js';
+    document.getElementById('mode').textContent =
+      MODE === 'supabase' ? 'Connected to Supabase' : 'Local demo mode: open the student and instructor pages as tabs in this same browser';
+  </script>
+</body>
+</html>
