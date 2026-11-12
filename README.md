@@ -1,78 +1,95 @@
 # 🧭 Calm Compass
 
-Emotional regulation breaks for autistic students, built from each kid's own words.
-Capital Hacks 5.0 · Health track.
+**Live demo:** [hackathon-beta-sand.vercel.app](https://hackathon-beta-sand.vercel.app)
+→ [Instructor view](https://hackathon-beta-sand.vercel.app/teacher) · [Student view](https://hackathon-beta-sand.vercel.app/kid)
 
-**Two portals**
-- **Student (`/kid`)**: onboarding questionnaire (name → 4 most common feelings → 4 reasons for each = 16 personal feeling/why pairs → school + class code). Then: "I need a break" button and "My feelings" trends.
-- **Instructor (`/teacher`)**: live class view. The instructor can start a break, which locks the kid's screen, and choose calming sounds, the 90-second breathing clip, or let the student choose. Includes a live activity feed, "Resume class" to unlock, and reports with trends.
+Built at Capital Hacks 5.0 for the Health track.
 
-**Break flow:** screen locks → "How are you feeling, Maya?" (her 4 feelings) → "Why?" (her 4 reasons) → "How big is the feeling?" → affirmation + tip for that exact pair, plus calming audio or breathing for 90 s → "How do you feel now?" → report saved to Supabase and streamed to the instructor → instructor resumes class.
+When an autistic student gets overwhelmed in class, they often can't put into words what's wrong, and the teacher is left guessing. Calm Compass gives that student a way to say "I need a break" and explain why with a few taps, using feelings and reasons they picked themselves. The teacher sees the check-in instantly, guides a calming break, and over time can see what triggers each student and what actually helps.
 
-## Run locally (no setup)
+## Try it in two minutes
+
+1. Open the [instructor view](https://hackathon-beta-sand.vercel.app/teacher) and click **Create demo class**. That gives you three students with four weeks of history.
+2. Open the [student view](https://hackathon-beta-sand.vercel.app/kid) on your phone (or in another browser) and sign up with the class code shown on the teacher screen.
+3. On the teacher screen, hit **🔒 Start break** on your student. Their screen locks into a calm check-in.
+4. Pick a feeling, a reason, and how big it is, then do the breathing exercise. Watch the teacher's live feed update as you tap.
+5. Hit **▶ Resume class** to unlock. Then check the **Reports** and **AI Assistant** tabs.
+
+The **⌂ Home** button in the bottom corner takes you back to the student/instructor picker.
+
+## How it works
+
+**Students** start with a short questionnaire: their name, up to four feelings they have most often, and up to four reasons for each one. Their check-ins are built from those answers, so a kid sees *their* words, not a generic list. They can ask for a break anytime, and they can see their own feelings chart.
+
+**Instructors** get a live dashboard of the class. They can start a break (which locks the student's screen), pick a calming activity or let the student choose, and resume class when the student is ready. Reports show triggers, which calming activities work, and whether students are starting to ask for breaks on their own.
+
+**A break** goes like this: the screen locks → "How are you feeling, Maya?" → "Why?" → "How big is the feeling?" → an affirmation and tip written for that exact feeling and reason, plus 90 seconds of calming sounds or guided breathing → "How do you feel now?" The answers save to Supabase and show up on the teacher's screen right away.
+
+## The AI assistant
+
+Teachers can ask questions about their class in plain English, like "Who needs the most support this week?" Instead of guessing, the model looks through the break data with a set of tools (patterns by time and day, which calming activities worked, recent breaks) and answers with real numbers. Little chips under each answer show what it checked.
+
+It also posts up to three suggestions on the Live tab. When it spots a predictable trigger, like a student who always struggles after lunch, it can suggest a calm check-in at that time. Nothing happens unless the teacher approves it.
+
+On the student side, the app pre-selects whichever calming activity has helped that student most for that feeling. That part is simple stats, no AI.
+
+It runs on Gemini's free tier by default. Claude works too if you have API credits.
+
+## Running it yourself
+
 ```bash
 npm install
 npm run dev
 ```
-With no Supabase keys set, the app runs in **local demo mode**: open `/teacher` and `/kid` as two tabs in the same browser and they sync with each other. Use this as the backup demo if venue wifi dies.
 
-## Connect Supabase
-1. Create a project at supabase.com.
-2. In the SQL Editor, paste and run `supabase/schema.sql`. It creates the tables, turns on realtime, and adds demo access rules.
-3. Copy `.env.example` to `.env` and fill in values from Project Settings → API:
-   ```
-   VITE_SUPABASE_URL=https://xxxx.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJ...
-   ```
-4. Run `npm run dev`. The landing page should say "Connected to Supabase". Kid and teacher can now be on different devices; `npm run dev` uses `--host`, so phones on the same wifi can open `http://<your-ip>:5173/kid`.
+With no keys set, it runs in **local demo mode**: open `/teacher` and `/kid` as tabs in the same browser and they sync with each other. That's also our backup if the wifi dies during a demo.
 
-## Deploy to Vercel
-1. Push the repo to GitHub, then go to vercel.com → Add New Project → import it. Vercel detects Vite automatically.
-2. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under Environment Variables, then deploy.
-3. `vercel.json` turns on clean URLs, so `/kid` and `/teacher` work.
+To connect the real backend, create a `.env` file next to `package.json`:
 
-## Demo script (about 3 min)
-1. **Teacher laptop:** `/teacher` → **Create demo class**. This adds 3 students and 4 weeks of history. Show **Reports**: fewer instructor locks over time, more breaks the students asked for, and the stress trend going down.
-2. **Tablet/phone:** `/kid` → do onboarding live as "Maya" with the demo class code (on the teacher screen).
-3. Teacher → Maya's card → pick "90-second breathing" → **🔒 Start break**. Maya's screen locks.
-4. Maya picks *Frustrated → The work is too hard → Really big*. The teacher feed updates live at each tap.
-5. Calming plays with Maya's personal affirmation → "Better" → **▶ Resume class** → back to learning.
-6. Show Maya's own "My feelings" page: the student sees their own data too.
-
-## 🤖 AI agent (Gemini free tier, or Claude)
-- **Insights Agent** (instructor → *AI Assistant* tab): ask questions in plain English. The model calls tools (`list_students`, `get_breaks`, `find_patterns`, `activity_effectiveness`, `propose_checkin`) over the class's break data before answering. The chips under each answer show which tools it used.
-- **Proactive suggestions** (Live tab): the agent reviews the class on load and after each finished break, then posts up to 3 evidence-backed suggestions. **Schedule check-in** sets a calm check-in that automatically starts that student's break at the chosen time while the dashboard is open. A human approves every action.
-- **Smart calming pick** (student side, no AI call): pre-selects the calming activity that most often led to "Better" for that student and that feeling.
-
-**Setup (free):** get a key at aistudio.google.com → *Get API key*, add `GEMINI_API_KEY=...` to `.env`, restart `npm run dev`. On Vercel, add the same variable and redeploy. The free tier has per-minute and per-day limits; if you hit one, the app says to wait a minute. Optional `GEMINI_MODEL` (default `gemini-2.5-flash`).
-**Claude instead:** set `ANTHROPIC_API_KEY` (console.anthropic.com, paid credits; not included in Claude Pro). If both keys are set, Gemini is used unless `AI_PROVIDER=claude`.
-The key stays server-side: `/api/agent` is a Vercel function (`api/agent.js`), and locally the same code runs inside the Vite dev server. **Never** give it a `VITE_` prefix.
-**Privacy:** the agent receives first names and break records only (no school, no free text). Gemini's free tier may use prompts to improve Google's products: fine for demo data, not for real students. Before real use, minimize further (pseudonymous IDs) and review your district's data agreements.
-**Demo tip:** *Create demo class* builds data with patterns the agent should find: Maya gets overwhelmed by noise after lunch and breathing helps her, Leo gets frustrated with hard work on Tue/Thu mornings and calming sounds help him, Sam feels lonely at lunch or recess. Ask: "Who needs the most support this week?"
-
-## Structure
 ```
-index.html / kid.html / teacher.html   pages (Vite multi-page)
-src/content.js   8 feelings × 6 reasons, an affirmation + tip for each pair
-src/kid.js       onboarding, lock-screen break flow, student trends
-src/teacher.js   live control, feed, reports
-src/charts.js    Chart.js reports shared by both portals
-src/calm.js      generated calming audio (Web Audio) + 90 s breathing animation
-src/db.js        Supabase data layer + local fallback
-src/demo.js      demo class generator (with patterns for the agent to find)
-src/assistant.js AI Assistant chat, suggestion cards, check-in scheduler
-api/_agent.js    LLM tool-use loop (Gemini + Claude) + tools (shared by Vercel + local dev)
-api/agent.js     Vercel serverless function: POST /api/agent
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_...
+GEMINI_API_KEY=your-key
+GEMINI_MODEL=gemini-3.5-flash-lite
+```
+
+- **Supabase:** create a project, then run `supabase/schema.sql` in the SQL Editor. Use the *publishable* key, never the secret one.
+- **Gemini:** free key from [aistudio.google.com](https://aistudio.google.com) → Get API key. Don't put `VITE_` in front of it, or it ends up in the browser. `GEMINI_MODEL` is optional; flash-lite is faster and less likely to be overloaded on the free tier.
+- **Claude instead:** set `ANTHROPIC_API_KEY` (from console.anthropic.com; it's separate from a Claude Pro subscription). If both keys are set, add `AI_PROVIDER=claude` to use Claude.
+
+Restart `npm run dev` after changing `.env`.
+
+**Deploying:** the repo is connected to Vercel, so every push to `main` redeploys. Add the same variables under Vercel → Settings → Environment Variables, then redeploy once so they take effect.
+
+## Project layout
+
+```
+index.html / kid.html / teacher.html   the three pages
+src/kid.js        student onboarding, break flow, feelings chart
+src/teacher.js    live dashboard, feed, reports
+src/assistant.js  AI Assistant chat, suggestions, scheduled check-ins
+src/content.js    feelings, reasons, and an affirmation + tip for each pair
+src/calm.js       calming sounds and the 90-second breathing animation
+src/charts.js     report charts (Chart.js)
+src/db.js         Supabase + the local demo fallback
+src/demo.js       demo class generator, with patterns for the AI to find
+api/_agent.js     the AI agent and its tools (Gemini or Claude)
+api/agent.js      Vercel endpoint for the agent
 supabase/schema.sql
 ```
 
-## Design choices (good to mention to judges)
-- **The kid's own words:** check-in options come from their onboarding answers, not a generic list.
-- **Not punitive:** "You are not in trouble." Kids can also ask for breaks themselves, and the reports track the shift from instructor-started to self-requested breaks, which is the self-regulation goal.
-- **Sensory-friendly:** muted colors, no sudden sounds (audio fades in), big tap targets, respects reduced-motion settings.
-- **Measures what works:** the "How do you feel now?" answer shows which calming activity helps each kid.
+## Choices we made on purpose
 
-## Before real-world use / scaling
-- The demo access rules in `schema.sql` let anyone with the anon key read and write. Add Supabase Auth plus per-teacher policies before using real student data (COPPA/FERPA).
-- A browser can't truly lock a device. Pair it with iPad Guided Access or Chromebook kiosk mode.
-- **Future:** heart-rate sensors (smartwatch) to detect stress automatically instead of tapping, an LLM-written weekly summary for parents, and a parent portal.
+- **The student's own words.** Check-ins come from their answers, not a generic list.
+- **Breaks aren't punishments.** The lock screen says "You are not in trouble," and students can ask for breaks themselves. Our reports treat more self-requested breaks as progress, because that's what self-regulation looks like.
+- **Sensory-friendly.** Muted colors, no sudden sounds (audio fades in), big buttons, and it respects reduced-motion settings.
+- **Measure what works.** Every break ends with "How do you feel now?", so teachers can see which calming activity actually helps each student.
+- **The AI only helps the teacher.** It never talks to students, and every action it suggests needs a teacher's approval.
+
+## What we'd fix before real classrooms
+
+- The database rules are wide open for the demo. Real use needs logins and per-teacher access (COPPA/FERPA).
+- A browser can't truly lock a tablet. It would need iPad Guided Access or Chromebook kiosk mode.
+- Scheduled check-ins live in the teacher's browser and only fire while the dashboard is open.
+
+Next up: heart-rate sensors to catch stress without tapping, a weekly summary for parents, and a parent portal.
