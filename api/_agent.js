@@ -181,7 +181,7 @@ export function pickProvider(env = {}) {
   const want = (env.AI_PROVIDER || '').toLowerCase();
   const provider = want || (env.GEMINI_API_KEY ? 'gemini' : env.ANTHROPIC_API_KEY ? 'claude' : 'gemini');
   const key = provider === 'claude' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY;
-  const model = provider === 'claude' ? (env.ANTHROPIC_MODEL || 'claude-sonnet-5-5') : (env.GEMINI_MODEL || 'gemini-2.5-flash');
+  const model = provider === 'claude' ? (env.ANTHROPIC_MODEL || 'claude-sonnet-5-5') : (env.GEMINI_MODEL || 'gemini-3.8-flash');
   return { provider, key, model };
 }
 
