@@ -3,7 +3,7 @@
 // api/agent.js (Vercel) and the Vite dev middleware (local).
 import { EMOTIONS, ACTIVITIES } from '../src/content.js';
 
-const MAX_STEPS = 8;
+const MAX_STEPS = 6;
 const DAY = 86400000;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -165,6 +165,7 @@ The teacher's local date/time is ${nowLocal}.
 
 How to work:
 - Always call tools to get evidence before answering. Never invent numbers.
+- Be efficient: request every tool you need in the same turn (parallel calls), usually find_patterns plus activity_effectiveness. Aim to answer within 2 tool rounds.
 - Be concise: 3-6 short sentences or a few bullets. Lead with the answer. Cite specific numbers.
 - Focus on changing the environment and routines (noise, transitions, lunch, schedule previews, seating), not on "fixing" the child. Use neutral, respectful, neurodiversity-affirming language.
 - A rise in student-requested breaks is GOOD (self-advocacy); a drop in instructor-started breaks is progress.
@@ -205,6 +206,9 @@ async function geminiLoop({ gemini, model, system, tools, convo, onCalls }) {
   const contents = convo.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
   const config = {
     systemInstruction: system,
+    // Gemini 3 models think before every step by default; low thinking keeps a multi-step tool loop fast.
+    ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
+    httpOptions: { timeout: 45000 },
     tools: [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.input_schema })) }],
   };
   for (let i = 0; i < MAX_STEPS; i++) {
@@ -225,7 +229,7 @@ export async function runAgent({ mode = 'chat', messages = [], students = [], br
   const { provider, key, model } = pickProvider(env);
   const client = clients[provider];
   if (!client && !key) {
-    const err = new Error(provider === 'claude' ? 'ANTHROPIC_API_KEY is not set' : 'GEMINI_API_KEY is not set'); err.status = 503; throw err;
+    const err = new Error(provider === 'claude' ? 'ANTHROPIC_API_KEY is not set' : 'GEMINI_API_KEY is not set'); err.noKey = true; throw err;
   }
   const ctx = { students, breaks: [...breaks].sort((a, b) => a.started_at.localeCompare(b.started_at)),
     now: nowISO ? new Date(nowISO).getTime() : Date.now(), tzOffsetMin: +tzOffsetMin || 0, timeZone, proposals: [], suggestions: null };
@@ -266,15 +270,20 @@ export async function runAgent({ mode = 'chat', messages = [], students = [], br
 }
 
 // Shared request handler (Vercel function + Vite dev middleware)
-export async function handleAgentRequest(body, env) {
+export async function handleAgentRequest(body, env, clients) {
   try {
-    return { status: 200, json: await runAgent(body || {}, env) };
+    return { status: 200, json: await runAgent(body || {}, env, clients) };
   } catch (e) {
-    console.error('[agent]', e);
-    const status = e.status === 503 ? 503 : e.status === 429 ? 429 : 500;
-    const msg = status === 503 ? e.message
-      : status === 429 ? 'The AI is getting too many requests (free-tier limit). Wait a minute and try again.'
-      : `Agent error: ${e.message}`;
-    return { status, json: { error: msg } };
+    console.error('[agent]', e?.status ?? '', e?.message ?? e);
+    if (e.noKey) return { status: 503, json: { error: e.message, code: 'no_key' } };
+    const up = Number(e.status) || 0;
+    const timedOut = /abort|timeout/i.test(e?.name + ' ' + e?.message);
+    if (up === 429) return { status: 429, json: { code: 'rate_limit', error: 'The AI hit its free-tier limit. Wait a minute and try again.' } };
+    if (up === 503 || up === 529 || /overloaded|unavailable/i.test(e?.message)) {
+      return { status: 503, json: { code: 'busy', error: 'The AI model is overloaded right now. Try again in a minute, or set GEMINI_MODEL=gemini-3.5-flash-lite in .env.' } };
+    }
+    if (timedOut) return { status: 504, json: { code: 'timeout', error: 'The AI took too long to answer. Try again or ask a narrower question.' } };
+    if (up === 400 || up === 401 || up === 403) return { status: up, json: { code: 'auth', error: `The AI provider rejected the request (${up}). Check the API key and model name. Details: ${e.message}` } };
+    return { status: 500, json: { code: 'error', error: `Agent error: ${e.message}` } };
   }
 }

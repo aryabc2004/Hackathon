@@ -39,7 +39,7 @@ function payload(ctx, extra) {
 async function callAgent(body) {
   const res = await fetch('/api/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   let json = {}; try { json = await res.json(); } catch {}
-  if (!res.ok) { const e = new Error(json.error || `Agent unavailable (${res.status})`); e.status = res.status; throw e; }
+  if (!res.ok) { const e = new Error(json.error || `Agent unavailable (${res.status})`); e.status = res.status; e.code = json.code; throw e; }
   return json;
 }
 
@@ -95,7 +95,7 @@ export function renderSuggestions(el, ctx, { refresh = false } = {}) {
 }
 
 export function scheduleSuggestionRefresh(getEl, ctx) {
-  if (sugg.error?.status === 503 || sugg.error?.status === 429) return; // no API key: don't keep retrying
+  if (['no_key', 'rate_limit'].includes(sugg.error?.code)) return; // don't burn quota retrying // no API key: don't keep retrying
   clearTimeout(sugg.timer);
   sugg.timer = setTimeout(() => { const el = getEl(); if (el) renderSuggestions(el, ctx, { refresh: true }); }, 8000);
 }
@@ -116,7 +116,7 @@ function draw(el, ctx) {
       <button class="btn ghost small" data-refresh ${sugg.loading ? 'disabled' : ''}>${sugg.loading ? 'Analyzing…' : '↻ Refresh'}</button></div>
     <div style="margin-top:10px">
       ${sugg.loading && !sugg.items ? '<p class="muted">Reviewing this class’s break patterns…</p>' : ''}
-      ${sugg.error ? `<p class="muted">${sugg.error.status === 503 ? 'Add <code>GEMINI_API_KEY</code> (free) or <code>ANTHROPIC_API_KEY</code> to .env to enable the AI agent.' : esc(sugg.error.message)}</p>` : ''}
+      ${sugg.error ? `<p class="muted">${sugg.error.code === 'no_key' ? 'Add <code>GEMINI_API_KEY</code> (free) or <code>ANTHROPIC_API_KEY</code> to .env to enable the AI agent.' : esc(sugg.error.message)}</p>` : ''}
       ${sugg.items && !items.length && !sugg.loading ? '<p class="muted">No suggestions right now.</p>' : ''}
       ${(sugg.items || []).map((s, i) => sugg.dismissed.has(`${s.student_id}|${s.title}|${i}`) ? '' : `
         <div style="padding:10px 0;border-bottom:1px dashed var(--line)">
@@ -185,7 +185,7 @@ export function renderAssistant(main, ctx, prefill) {
       const out = await callAgent(payload(ctx, { mode: 'chat', messages: chat.messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content })) }));
       chat.messages.push({ role: 'assistant', content: out.reply || '(no answer)', steps: out.steps, proposals: out.proposals });
     } catch (e) {
-      chat.messages.push({ role: 'assistant', error: true, content: e.status === 503 ? 'The AI agent is not set up yet: add GEMINI_API_KEY (free, from aistudio.google.com) to .env and to Vercel.' : e.message });
+      chat.messages.push({ role: 'assistant', error: true, content: e.code === 'no_key' ? 'The AI agent is not set up yet: add GEMINI_API_KEY (free, from aistudio.google.com) to .env and to Vercel.' : e.message });
     }
     chat.busy = false; if (main.isConnected) draw();
   };
