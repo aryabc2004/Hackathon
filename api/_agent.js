@@ -1,7 +1,6 @@
-// Calm Compass Insights Agent: Claude with tool use over the class's break data.
+// Calm Compass Insights Agent: an LLM (Gemini or Claude) with tool use over the class's break data.
 // Files in /api starting with "_" are not routes on Vercel; this is shared by
 // api/agent.js (Vercel) and the Vite dev middleware (local).
-import Anthropic from '@anthropic-ai/sdk';
 import { EMOTIONS, ACTIVITIES } from '../src/content.js';
 
 const MAX_STEPS = 8;
@@ -175,12 +174,59 @@ How to work:
 
 const SUGGEST_PROMPT = 'Review the whole class for the last 2-4 weeks. Find up to 3 of the most useful, specific, evidence-backed suggestions (a pattern + one concrete action). Include a proposed check-in date/time only when there is a clear time-of-day pattern; use a school day today or later. Then call submit_suggestions once.';
 
-// ---------------------------------------------------------------- main loop
-export async function runAgent({ mode = 'chat', messages = [], students = [], breaks = [], nowLocal, nowISO, tzOffsetMin = 0, timeZone }, { apiKey, model, client } = {}) {
-  if (!client && !apiKey) {
-    const err = new Error('ANTHROPIC_API_KEY is not set'); err.status = 503; throw err;
+// ---------------------------------------------------------------- providers
+// Each provider runs the same tool loop; only the message format differs.
+// AI_PROVIDER=gemini|claude picks one; otherwise whichever key is set is used (Gemini first: it has a free tier).
+export function pickProvider(env = {}) {
+  const want = (env.AI_PROVIDER || '').toLowerCase();
+  const provider = want || (env.GEMINI_API_KEY ? 'gemini' : env.ANTHROPIC_API_KEY ? 'claude' : 'gemini');
+  const key = provider === 'claude' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY;
+  const model = provider === 'claude' ? (env.ANTHROPIC_MODEL || 'claude-sonnet-5-5') : (env.GEMINI_MODEL || 'gemini-2.5-flash');
+  return { provider, key, model };
+}
+
+async function claudeLoop({ anthropic, model, system, tools, convo, onCalls }) {
+  const messages = convo.map((m) => ({ role: m.role, content: m.content }));
+  for (let i = 0; i < MAX_STEPS; i++) {
+    const res = await anthropic.messages.create({ model, max_tokens: 1200, system, tools, messages });
+    messages.push({ role: 'assistant', content: res.content });
+    const calls = res.content.filter((c) => c.type === 'tool_use');
+    if (res.stop_reason !== 'tool_use' || !calls.length) {
+      return res.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
+    }
+    const outs = onCalls(calls.map((c) => ({ name: c.name, input: c.input || {} })));
+    messages.push({ role: 'user', content: calls.map((c, k) => ({ type: 'tool_result', tool_use_id: c.id, content: JSON.stringify(outs[k]) })) });
+    if (outs.stop) return '';
   }
-  const anthropic = client || new Anthropic({ apiKey });
+  return null;
+}
+
+async function geminiLoop({ gemini, model, system, tools, convo, onCalls }) {
+  const contents = convo.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+  const config = {
+    systemInstruction: system,
+    tools: [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.input_schema })) }],
+  };
+  for (let i = 0; i < MAX_STEPS; i++) {
+    const res = await gemini.models.generateContent({ model, contents, config });
+    const calls = res.functionCalls || [];
+    if (!calls.length) return (res.text || '').trim();
+    // Send the model's turn back unchanged (it can carry thought signatures newer models require).
+    contents.push(res.candidates?.[0]?.content || { role: 'model', parts: calls.map((c) => ({ functionCall: c })) });
+    const outs = onCalls(calls.map((c) => ({ name: c.name, input: c.args || {} })));
+    contents.push({ role: 'user', parts: calls.map((c, k) => ({ functionResponse: { id: c.id, name: c.name, response: { result: outs[k] } } })) });
+    if (outs.stop) return '';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- main
+export async function runAgent({ mode = 'chat', messages = [], students = [], breaks = [], nowLocal, nowISO, tzOffsetMin = 0, timeZone }, env = {}, clients = {}) {
+  const { provider, key, model } = pickProvider(env);
+  const client = clients[provider];
+  if (!client && !key) {
+    const err = new Error(provider === 'claude' ? 'ANTHROPIC_API_KEY is not set' : 'GEMINI_API_KEY is not set'); err.status = 503; throw err;
+  }
   const ctx = { students, breaks: [...breaks].sort((a, b) => a.started_at.localeCompare(b.started_at)),
     now: nowISO ? new Date(nowISO).getTime() : Date.now(), tzOffsetMin: +tzOffsetMin || 0, timeZone, proposals: [], suggestions: null };
 
@@ -195,35 +241,40 @@ export async function runAgent({ mode = 'chat', messages = [], students = [], br
         }, []).filter((m, i, arr) => i > 0 || m.role === 'user' || arr.length === 1);
   const steps = [];
 
-  for (let i = 0; i < MAX_STEPS; i++) {
-    const res = await anthropic.messages.create({
-      model: model || 'claude-sonnet-5-5', max_tokens: 1200, system: SYSTEM(nowLocal || new Date().toString()),
-      tools, messages: convo,
+  // Runs a batch of tool calls; flags .stop once suggestions are submitted.
+  const onCalls = (calls) => {
+    const outs = calls.map(({ name, input }) => {
+      steps.push(name);
+      try { return runTool(name, input, ctx); } catch (e) { return { error: e.message }; }
     });
-    convo.push({ role: 'assistant', content: res.content });
-    const calls = res.content.filter((c) => c.type === 'tool_use');
-    if (res.stop_reason !== 'tool_use' || !calls.length) {
-      const reply = res.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
-      return { reply, steps, proposals: ctx.proposals, suggestions: ctx.suggestions };
-    }
-    const results = calls.map((c) => {
-      steps.push(c.name);
-      let out; try { out = runTool(c.name, c.input || {}, ctx); } catch (e) { out = { error: e.message }; }
-      return { type: 'tool_result', tool_use_id: c.id, content: JSON.stringify(out) };
-    });
-    convo.push({ role: 'user', content: results });
-    if (mode === 'suggest' && ctx.suggestions) return { reply: '', steps, proposals: [], suggestions: ctx.suggestions };
+    if (mode === 'suggest' && ctx.suggestions) outs.stop = true;
+    return outs;
+  };
+
+  const args = { model, system: SYSTEM(nowLocal || new Date().toString()), tools, convo, onCalls };
+  let reply;
+  if (provider === 'claude') {
+    const anthropic = client || new (await import('@anthropic-ai/sdk')).default({ apiKey: key });
+    reply = await claudeLoop({ ...args, anthropic });
+  } else {
+    const gemini = client || new (await import('@google/genai')).GoogleGenAI({ apiKey: key });
+    reply = await geminiLoop({ ...args, gemini });
   }
-  return { reply: 'I ran out of steps while analyzing. Try a more specific question.', steps, proposals: ctx.proposals, suggestions: ctx.suggestions };
+  if (reply === null) reply = 'I ran out of steps while analyzing. Try a more specific question.';
+  if (mode === 'suggest') reply = '';
+  return { reply, steps, proposals: ctx.proposals, suggestions: ctx.suggestions, provider };
 }
 
 // Shared request handler (Vercel function + Vite dev middleware)
 export async function handleAgentRequest(body, env) {
   try {
-    const out = await runAgent(body || {}, { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL });
-    return { status: 200, json: out };
+    return { status: 200, json: await runAgent(body || {}, env) };
   } catch (e) {
     console.error('[agent]', e);
-    return { status: e.status || 500, json: { error: e.status === 503 ? e.message : `Agent error: ${e.message}` } };
+    const status = e.status === 503 ? 503 : e.status === 429 ? 429 : 500;
+    const msg = status === 503 ? e.message
+      : status === 429 ? 'The AI is getting too many requests (free-tier limit). Wait a minute and try again.'
+      : `Agent error: ${e.message}`;
+    return { status, json: { error: msg } };
   }
 }
