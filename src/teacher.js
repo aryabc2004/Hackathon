@@ -2,6 +2,7 @@ import { db, MODE, local } from './db.js';
 import { EMOTIONS, SIZES, AFTER, ACTIVITIES } from './content.js';
 import { renderReport } from './charts.js';
 import { buildDemo } from './demo.js';
+import { renderAssistant, renderSuggestions, scheduleSuggestionRefresh, startScheduler } from './assistant.js';
 
 const app = document.getElementById('app');
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -16,6 +17,11 @@ let subs = [];
 let tab = 'live';
 let reportStudent = 'all';
 let feed = [];
+const actx = {
+  get code() { return cls?.code; }, get students() { return students; }, get breaks() { return breaks; },
+  toast: (m) => toast(m),
+  openAssistant: (q) => { tab = 'assistant'; renderShell(q); },
+};
 const seen = new Map(); // break id -> last known row (for feed diffs)
 
 const STEP_LABEL = {
@@ -71,20 +77,29 @@ async function start(c) {
   subs = [
     db.subscribeClass(c.code, {
       onStudent: (s) => { students.set(s.id, { ...students.get(s.id), ...s }); refresh(); },
-      onBreak: (b) => { const merged = { ...breaks.get(b.id), ...b }; breaks.set(b.id, merged); logBreak(merged); refresh(); },
+      onBreak: (b) => {
+        const prevAfter = breaks.get(b.id)?.after;
+        const merged = { ...breaks.get(b.id), ...b }; breaks.set(b.id, merged); logBreak(merged); refresh();
+        if (merged.after && !prevAfter) scheduleSuggestionRefresh(() => app.querySelector('#suggest'), actx);
+      },
     }),
     db.watchPresence(c.code, (set) => { online = set; refreshCards(); }),
   ];
+  startScheduler(c.code, (ck) => {
+    const s = students.get(ck.student_id);
+    if (s && s.status !== 'break') { startBreak(s, ''); toast(`Scheduled check-in started for ${s.name}`); }
+  }, () => { if (tab === 'live') renderSuggestions(app.querySelector('#suggest'), actx); });
   renderShell();
 }
 
-function renderShell() {
+function renderShell(prefill) {
   app.innerHTML = `
     <header class="topbar">
       <span class="brand">🧭 Calm Compass</span>
       <div class="tabs" style="margin-left:12px">
         <button data-tab="live" class="${tab === 'live' ? 'active' : ''}">Live class</button>
         <button data-tab="reports" class="${tab === 'reports' ? 'active' : ''}">Reports</button>
+        <button data-tab="assistant" class="${tab === 'assistant' ? 'active' : ''}">🤖 AI Assistant</button>
       </div>
       <span class="spacer"></span>
       ${MODE === 'local' ? '<span class="pill gray">local demo</span>' : ''}
@@ -95,7 +110,9 @@ function renderShell() {
     <main class="wrap stack" id="main" style="max-width:1200px"></main>`;
   app.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { tab = b.dataset.tab; renderShell(); }));
   app.querySelector('#switch').onclick = () => { subs.forEach((u) => u()); subs = []; local.del('cc_class'); renderSetup(); };
-  tab === 'live' ? renderLive() : renderReports();
+  if (tab === 'live') renderLive();
+  else if (tab === 'reports') renderReports();
+  else renderAssistant(app.querySelector('#main'), actx, prefill);
 }
 
 function renderLive() {
@@ -108,8 +125,12 @@ function renderLive() {
       <div class="muted" id="summary"></div>
     </div>
     <div class="grid students" id="cards"></div>
-    <div class="card"><h3>Live activity</h3><div class="feed" id="feed"></div></div>`;
+    <div class="charts">
+      <div class="card" id="suggest"></div>
+      <div class="card"><h3>Live activity</h3><div class="feed" id="feed"></div></div>
+    </div>`;
   refreshCards(); refreshFeed();
+  renderSuggestions(main.querySelector('#suggest'), actx);
 }
 
 function currentBreak(s) { return s.current_break ? breaks.get(s.current_break) : null; }
@@ -200,7 +221,7 @@ function refreshFeed() {
 let rTimer;
 function refresh() {
   if (tab === 'live') { refreshCards(); refreshFeed(); }
-  else { clearTimeout(rTimer); rTimer = setTimeout(drawReport, 400); }
+  else if (tab === 'reports') { clearTimeout(rTimer); rTimer = setTimeout(drawReport, 400); }
 }
 
 // ============================================================ Reports

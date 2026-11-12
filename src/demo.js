@@ -4,17 +4,21 @@
 import { EMOTIONS } from './content.js';
 
 const PROFILES = [
-  { name: 'Maya', school: 'Sutter Middle School', emotions: {
+  // pattern: the story the AI agent should discover (trigger time/day, top feeling→reason, what helps)
+  { name: 'Maya', school: 'Sutter Middle School',
+    pattern: { hours: [12, 13], days: null, emotion: 'overwhelmed', reason: 'noise_lots', best: 'breathe' }, emotions: {
     frustrated: ['too_hard', 'change', 'waiting', 'not_understood'],
     overwhelmed: ['noise_lots', 'too_much', 'instructions', 'bright'],
     angry: ['interrupted', 'unfair', 'noise', 'lost_game'],
     worried: ['whats_next', 'in_trouble', 'homework', 'friends'] } },
-  { name: 'Leo', school: 'Sutter Middle School', emotions: {
+  { name: 'Leo', school: 'Sutter Middle School',
+    pattern: { hours: [9], days: [2, 4], emotion: 'frustrated', reason: 'too_hard', best: 'audio' }, emotions: {
     angry: ['unfair', 'teased', 'touched', 'interrupted'],
     frustrated: ['too_hard', 'cant_do', 'waiting', 'broken'],
     sad: ['left_out', 'mistake', 'tired', 'no_reason'],
     fearful: ['loud_sudden', 'new_thing', 'crowd', 'test'] } },
-  { name: 'Sam', school: 'Sutter Middle School', emotions: {
+  { name: 'Sam', school: 'Sutter Middle School',
+    pattern: { hours: [11, 12], days: null, emotion: 'lonely', reason: 'lunch', best: 'breathe' }, emotions: {
     sad: ['left_out', 'miss_someone', 'tired', 'mistake'],
     lonely: ['no_one_play', 'different', 'lunch', 'ignored'],
     fearful: ['test', 'crowd', 'new_thing', 'something_bad'],
@@ -38,17 +42,23 @@ export async function buildDemo(db) {
       if (day.getDay() === 0 || day.getDay() === 6) continue; // school days only
       const progress = 1 - d / 27; // 0 = 4 weeks ago, 1 = yesterday
       const n = weighted([[0, 1 + progress * 2], [1, 3], [2, 2.5 - progress * 1.5], [3, 1.2 - progress]]);
-      for (let i = 0; i < n; i++) {
-        const start = new Date(day); start.setHours(8 + Math.floor(Math.random() * 6), Math.floor(Math.random() * 60), 0, 0);
+      const pt = p.pattern;
+      const patternDay = !pt.days || pt.days.includes(day.getDay());
+      for (let i = 0; i < n + (patternDay && pt.days ? 1 : 0); i++) {
+        const onPattern = patternDay && Math.random() < 0.7;
+        const start = new Date(day);
+        start.setHours(onPattern ? rand(pt.hours) : 8 + Math.floor(Math.random() * 6), Math.floor(Math.random() * 60), 0, 0);
         const end = new Date(start.getTime() + (3 + Math.random() * 6) * 60000);
-        const emotion = weighted(keys.map((k, j) => [k, 4 - j]));
+        const emotion = onPattern ? pt.emotion : weighted(keys.map((k, j) => [k, 4 - j]));
+        const activity = rand(['audio', 'breathe']);
+        const helps = activity === pt.best ? 1.8 : 0.6; // each kid has an activity that works better for them
         rows.push({
           student_id: s.id, class_code: cls.code,
           initiated_by: Math.random() < 0.75 - progress * 0.5 ? 'instructor' : 'student',
-          step: 'done', emotion, reason: rand(p.emotions[emotion]),
+          step: 'done', emotion, reason: onPattern ? pt.reason : rand(p.emotions[emotion]),
           size: weighted([[3, 2.2 - progress * 1.6], [2, 2], [1, 0.6 + progress * 1.8]]),
-          activity: rand(['audio', 'breathe']),
-          after: weighted([['better', 1.5 + progress * 2.5], ['same', 1.2], ['worse', 0.7 - progress * 0.5]]),
+          activity,
+          after: weighted([['better', (1.2 + progress * 2) * helps], ['same', 1.2], ['worse', 0.7 - progress * 0.5]]),
           started_at: start.toISOString(), ended_at: end.toISOString(),
         });
       }

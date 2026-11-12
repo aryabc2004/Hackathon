@@ -279,12 +279,35 @@ function stepSize() {
   onTile((k) => { brk.size = +k; save({ size: +k, step: 'calming' }); stepCalming(); });
 }
 
-function stepCalming() {
+// Smart pick: the activity that most often led to "Better" for this kid and this
+// feeling (needs 2+ past sessions). Falls back to the kid's overall history.
+async function bestActivity(emotion) {
+  let hist = [];
+  try { hist = (await db.listBreaks({ studentId: student.id })).filter((b) => b.activity && b.after && b.id !== brk?.id); } catch {}
+  const score = (rows) => Object.keys(ACTIVITIES).map((a) => {
+    const x = rows.filter((b) => b.activity === a);
+    return { a, n: x.length, rate: x.length ? x.filter((b) => b.after === 'better').length / x.length : 0 };
+  }).filter((r) => r.n >= 2).sort((p, q) => q.rate - p.rate)[0];
+  const best = score(hist.filter((b) => b.emotion === emotion)) || score(hist);
+  return best && best.rate > 0 ? best.a : null;
+}
+
+async function stepCalming() {
   const pick = student.activity; // instructor may have chosen one
   if (pick) return runCalming(pick);
   const e = EMOTIONS[brk.emotion];
+  const id = brk.id;
+  const best = await bestActivity(brk.emotion);
+  if (!brk || brk.id !== id) return; // break ended while loading
+  const items = Object.entries(ACTIVITIES).map(([key, a]) => ({ key, ...a }))
+    .sort((x, y) => (y.key === best) - (x.key === best));
   frame(`<h1 class="center">What would help you feel calm?</h1>
-    ${tiles(Object.entries(ACTIVITIES).map(([key, a]) => ({ key, ...a })), 'two')}`, { color: e.soft });
+    ${tiles(items, 'two')}`, { color: e.soft });
+  if (best) {
+    const t = overlay.querySelector(`.tile[data-k="${best}"]`);
+    t.classList.add('selected');
+    t.insertAdjacentHTML('beforeend', '<span class="pill" style="font-size:.85rem">⭐ This helped you before</span>');
+  }
   onTile(runCalming);
 }
 

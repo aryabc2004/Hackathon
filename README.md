@@ -39,6 +39,16 @@ With no Supabase keys set, the app runs in **local demo mode**: open `/teacher` 
 5. Calming plays with Maya's personal affirmation → "Better" → **▶ Resume class** → back to learning.
 6. Show Maya's own "My feelings" page: the student sees their own data too.
 
+## 🤖 AI agent (Claude)
+- **Insights Agent** (instructor → *AI Assistant* tab): ask questions in plain English. Claude calls tools (`list_students`, `get_breaks`, `find_patterns`, `activity_effectiveness`, `propose_checkin`) over the class's break data before answering. The chips under each answer show which tools it used.
+- **Proactive suggestions** (Live tab): the agent reviews the class on load and after each finished break, then posts up to 3 evidence-backed suggestions. **Schedule check-in** sets a calm check-in that automatically starts that student's break at the chosen time while the dashboard is open. A human approves every action.
+- **Smart calming pick** (student side, no AI call): pre-selects the calming activity that most often led to "Better" for that student and that feeling.
+
+**Setup:** add `ANTHROPIC_API_KEY=sk-ant-...` to `.env` (from console.anthropic.com; API billing is separate from a Claude Pro plan), then restart `npm run dev`. On Vercel, add the same variable and redeploy. Optional: `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`; `claude-haiku-5-5` is cheaper and faster).
+The key stays server-side: `/api/agent` is a Vercel function (`api/agent.js`), and locally the same code runs inside the Vite dev server. **Never** give it a `VITE_` prefix.
+**Privacy:** the agent receives first names and break records only (no school, no free text). Before real use, minimize further (pseudonymous IDs) and review your district's data agreements.
+**Demo tip:** *Create demo class* builds data with patterns the agent should find: Maya gets overwhelmed by noise after lunch and breathing helps her, Leo gets frustrated with hard work on Tue/Thu mornings and calming sounds help him, Sam feels lonely at lunch or recess. Ask: "Who needs the most support this week?"
+
 ## Structure
 ```
 index.html / kid.html / teacher.html   pages (Vite multi-page)
@@ -48,7 +58,10 @@ src/teacher.js   live control, feed, reports
 src/charts.js    Chart.js reports shared by both portals
 src/calm.js      generated calming audio (Web Audio) + 90 s breathing animation
 src/db.js        Supabase data layer + local fallback
-src/demo.js      demo class generator
+src/demo.js      demo class generator (with patterns for the agent to find)
+src/assistant.js AI Assistant chat, suggestion cards, check-in scheduler
+api/_agent.js    Claude tool-use loop + tools (shared by Vercel + local dev)
+api/agent.js     Vercel serverless function: POST /api/agent
 supabase/schema.sql
 ```
 
